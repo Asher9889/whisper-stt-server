@@ -3,6 +3,7 @@ import io
 import logging
 import os
 import time
+import warnings
 import wave
 from dataclasses import dataclass, field
 from typing import Any
@@ -13,6 +14,15 @@ from scipy.signal import resample_poly
 from ..config import Settings, settings
 
 logger = logging.getLogger("stt.whisper")
+
+# Apple Accelerate (numpy's default BLAS on macOS/arm64) sets bogus
+# floating-point exception flags in its sgemm kernel; numpy surfaces them as
+# RuntimeWarnings during faster-whisper's mel-spectrogram matmul even though
+# inputs and outputs are finite and numerically correct. Silence exactly that
+# message; anything else still surfaces.
+warnings.filterwarnings(
+    "ignore", message=r".*encountered in matmul", category=RuntimeWarning
+)
 
 # Domain vocabulary (Hindi agriculture) used as initial_prompt — the same
 # quality lever as the reference whisper_service.py.
@@ -48,6 +58,9 @@ class Job:
     word_timestamps: bool
     future: asyncio.Future
     queued_at: float = field(default_factory=time.monotonic)
+    include_segments: bool = False
+    use_config_default_language: bool = True
+    initial_prompt: str | None = DEFAULT_INITIAL_PROMPT
 
 
 class WhisperService:
@@ -218,7 +231,35 @@ class WhisperService:
             Job(audio, language, request_id, word_timestamps, future)
         )
 
+    async def transcribe_audio(
+        self,
+        audio: np.ndarray,
+        language: str | None = None,
+        request_id: str | None = None,
+        word_timestamps: bool = False,
+    ) -> dict[str, Any]:
+        """Transcribe already-decoded 16kHz float32 audio; returns segments."""
+        if audio.size == 0:
+            raise STTBadRequest("No decodable audio found at the given URL")
+
+        future = asyncio.get_running_loop().create_future()
+        return await self._enqueue(
+            Job(
+                audio,
+                language,
+                request_id,
+                word_timestamps,
+                future,
+                include_segments=True,
+                use_config_default_language=False,
+                initial_prompt=None,
+            )
+        )
+
     # ------------------------------------------------------------- impl ---
+    async def decode_audio_bytes(self, content: bytes) -> np.ndarray:
+        return await asyncio.to_thread(self._decode_file, content)
+
     def _decode_file(self, content: bytes) -> np.ndarray:
         from faster_whisper.audio import decode_audio
 
@@ -248,7 +289,9 @@ class WhisperService:
         if model is None:
             raise STTError("Whisper model is not loaded")
 
-        used_language = job.language or self.cfg.language
+        used_language = job.language or (
+            self.cfg.language if job.use_config_default_language else None
+        )
         segments_iter, info = model.transcribe(
             job.audio,
             language=used_language,
@@ -256,7 +299,7 @@ class WhisperService:
             temperature=self.cfg.temperature,
             vad_filter=self.cfg.vad_filter,
             condition_on_previous_text=self.cfg.condition_on_previous_text,
-            initial_prompt=DEFAULT_INITIAL_PROMPT,
+            initial_prompt=job.initial_prompt,
             word_timestamps=job.word_timestamps,
         )
         segments = list(segments_iter)
@@ -277,6 +320,30 @@ class WhisperService:
             "language": used_language or info.language,
             "confidence": confidence,
         }
+        if job.include_segments:
+            result["durationMs"] = int(round(info.duration * 1000))
+            result["segments"] = [
+                {
+                    "start": round(seg.start, 2),
+                    "end": round(seg.end, 2),
+                    "text": (seg.text or "").strip(),
+                    **(
+                        {
+                            "words": [
+                                {
+                                    "text": w.word,
+                                    "start": round(w.start, 3),
+                                    "end": round(w.end, 3),
+                                }
+                                for w in (seg.words or [])
+                            ]
+                        }
+                        if job.word_timestamps
+                        else {}
+                    ),
+                }
+                for seg in segments
+            ]
         if job.word_timestamps:
             result["words"] = [
                 {

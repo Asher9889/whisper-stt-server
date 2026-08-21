@@ -59,6 +59,54 @@ curl -X POST http://localhost:8000/transcribe \
   -F "language=hi"
 ```
 
+### POST /v1/transcriptions  (audio URL -> timestamped segments)
+
+Downloads audio from a URL, transcribes it with faster-whisper and returns
+segment-level timestamps. Bearer auth is enforced when `STT_API_TOKEN` is set.
+
+```bash
+curl -X POST http://localhost:8000/v1/transcriptions \
+  -H "Authorization: Bearer $STT_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "audioUrl": "https://storage.mssplonline.in/e-learning/materials/content_library/audios/853fe5e7-46bf-4c5b-b117-64bd9c3f5c56.wav",
+    "language": "en",
+    "wordTimestamps": true
+  }'
+```
+
+Response:
+
+```json
+{
+  "language": "en",
+  "durationMs": 268301,
+  "segments": [
+    { "start": 0.0, "end": 4.32, "text": "Welcome to today's class." },
+    { "start": 4.32, "end": 9.17, "text": "Today we are going to discuss..." }
+  ]
+}
+```
+
+Notes:
+
+- `language` is optional; omit it for auto-detection (the response then
+  contains the detected language).
+- `wordTimestamps` defaults to `false`. When `true`, each segment gains a
+  `words: [{text, start, end}]` array.
+- Downloads are capped at `STT_MAX_DOWNLOAD_MB` (default 100MB) and
+  `STT_DOWNLOAD_TIMEOUT_S` (default 120s); only `http`/`https` URLs are
+  accepted.
+- Unlike the LiveKit endpoints, this endpoint returns the JSON body directly
+  (no `{success, message, data}` envelope).
+
+| Status | Condition |
+|---|---|
+| 400 | Invalid URL/scheme, download failed, undecodable audio |
+| 401 | Missing/invalid bearer token (when `STT_API_TOKEN` is set) |
+| 429 | Inference queue full (retryable) |
+| 500 | Transcription failure |
+
 ### GET /v1/stt/health
 
 Liveness + model/device info + queue depth:

@@ -47,6 +47,11 @@ class Settings:
     # Concurrency / queue
     queue_maxsize: int = _env_int("WHISPER_QUEUE_MAXSIZE", 32)
 
+    # URL transcription API (POST /v1/transcriptions)
+    api_token: str | None = os.getenv("STT_API_TOKEN") or None
+    download_timeout_s: float = _env_float("STT_DOWNLOAD_TIMEOUT_S", 120.0)
+    max_download_mb: int = _env_int("STT_MAX_DOWNLOAD_MB", 100)
+
     # Debugging
     audio_dump_dir: str | None = os.getenv("WHISPER_AUDIO_DUMP_DIR") or None
 

@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from .api.speech import router as speech_router
+from .api.transcriptions import router as transcriptions_router
 from .config import settings
 from .services.whisper_service import whisper_service
 
@@ -33,12 +34,14 @@ app = FastAPI(
     title="STT Whisper Server",
     description=(
         "Self-hosted faster-whisper STT endpoint for the LiveKit voice agent. "
-        "Accepts raw mono s16le PCM per utterance via POST /transcribe-pcm."
+        "Accepts raw mono s16le PCM per utterance via POST /transcribe-pcm, "
+        "and audio URLs via POST /v1/transcriptions."
     ),
     version="1.0.0",
     lifespan=lifespan,
 )
 app.include_router(speech_router)
+app.include_router(transcriptions_router)
 
 
 @app.get("/", include_in_schema=False)
@@ -46,5 +49,10 @@ async def root() -> dict:
     return {
         "service": "stt-whisper",
         "version": "1.0.0",
-        "endpoints": ["/transcribe-pcm", "/transcribe", "/v1/stt/health"],
+        "endpoints": [
+            "/transcribe-pcm",
+            "/transcribe",
+            "/v1/transcriptions",
+            "/v1/stt/health",
+        ],
     }
