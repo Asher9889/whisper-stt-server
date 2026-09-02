@@ -60,7 +60,8 @@ class Job:
     queued_at: float = field(default_factory=time.monotonic)
     include_segments: bool = False
     use_config_default_language: bool = True
-    initial_prompt: str | None = DEFAULT_INITIAL_PROMPT
+    # #sym:initial_prompt (commented out - disable default domain vocabulary)
+    initial_prompt: str | None = None
 
 
 class WhisperService:
