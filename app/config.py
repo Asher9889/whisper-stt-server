@@ -26,7 +26,7 @@ def _env_float(name: str, default: float) -> float:
 @dataclass(frozen=True)
 class Settings:
     # Whisper model
-    model_name: str = os.getenv("WHISPER_MODEL", "turbo")
+    model_name: str = os.getenv("WHISPER_MODEL", "large-v3")
     model_dir: str | None = os.getenv("WHISPER_MODEL_DIR") or None
     device: str = os.getenv("WHISPER_DEVICE", "auto")  # auto | cuda | cpu
     compute_type: str = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
@@ -39,6 +39,14 @@ class Settings:
         "WHISPER_CONDITION_ON_PREVIOUS_TEXT", False
     )
     language: str | None = os.getenv("WHISPER_LANGUAGE", "hi") or None
+
+    # Hallucination guarding (segment-level filters)
+    no_speech_threshold: float = _env_float("WHISPER_NO_SPEECH_THRESHOLD", 0.6)
+    logprob_threshold: float = _env_float("WHISPER_LOGPROB_THRESHOLD", -1.0)
+    compression_ratio_threshold: float = _env_float(
+        "WHISPER_COMPRESSION_RATIO_THRESHOLD", 2.4
+    )
+    silence_signal_level: float = _env_float("WHISPER_SILENCE_LEVEL", 0.0001)
 
     # Audio / resampling
     target_sample_rate: int = _env_int("WHISPER_TARGET_SAMPLE_RATE", 16000)

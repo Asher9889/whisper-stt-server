@@ -146,6 +146,11 @@ def test_missing_audio_url_422():
     assert r.status_code == 422
 
 
+def test_invalid_language_400():
+    r = _post({"language": "xx-YY"})
+    assert r.status_code == 400
+
+
 def test_health_still_ok():
     r = client.get("/v1/stt/health")
     assert r.status_code == 200

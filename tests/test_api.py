@@ -114,6 +114,106 @@ def test_health():
     assert r.json()["status"] == "ok"
 
 
+def test_hallucinated_segments_filtered(monkeypatch):
+    from app.services.whisper_service import Job, WhisperService
+
+    class _Seg:
+        def __init__(
+            self,
+            text,
+            avg_logprob=-0.1,
+            no_speech_prob=0.0,
+            compression_ratio=1.0,
+        ):
+            self.text = text
+            self.avg_logprob = avg_logprob
+            self.no_speech_prob = no_speech_prob
+            self.compression_ratio = compression_ratio
+            self.start = 0.0
+            self.end = 1.0
+            self.words = []
+
+    class _Info:
+        language = "hi"
+        duration = 3.0
+
+    class _Model:
+        def __init__(self, segments):
+            self._segments = segments
+
+        def transcribe(self, audio, **kwargs):
+            return iter(self._segments), _Info()
+
+    svc = WhisperService()
+    svc._model = _Model(
+        [
+            _Seg("गेहूं में पीला रोग"),
+            _Seg("", avg_logprob=-0.1),
+            _Seg("thank you", no_speech_prob=0.9, avg_logprob=-1.5),
+            _Seg("लगा लगा लगा", compression_ratio=3.0),
+        ]
+    )
+
+    tone = (
+        np.sin(np.linspace(0, 1, 16000) * 2 * np.pi * 440) * 0.1
+    ).astype(np.float32)
+    job = Job(tone, "hi", None, False, None)
+    result = svc._infer(job)
+
+    assert result["transcript"] == "गेहूं में पीला रोग"
+    assert result["confidence"] > 0
+
+
+def test_silent_audio_skips_inference():
+    from app.services.whisper_service import Job, WhisperService
+
+    class _BrokenModel:
+        def transcribe(self, audio, **kwargs):
+            raise AssertionError("inference should be skipped for silence")
+
+    svc = WhisperService()
+    svc._model = _BrokenModel()
+    job = Job(np.zeros(16000, dtype=np.float32), "hi", None, False, None)
+    result = svc._infer(job)
+    assert result["transcript"] == ""
+    assert result["confidence"] == 0.0
+
+
+def test_invalid_language_400():
+    r = client.post(
+        "/transcribe-pcm",
+        content=_pcm(),
+        headers={"X-Sample-Rate": "48000"},
+        params={"language": "xx-YY"},
+    )
+    assert r.status_code == 400
+    assert "Invalid language code" in r.json()["detail"]
+    assert "xx-YY" in r.json()["detail"]
+
+
+def test_invalid_config_default_language_raises_400_before_inference():
+    from app.config import Settings
+    from app.services.whisper_service import (
+        Job,
+        STTBadRequest,
+        WhisperService,
+    )
+
+    svc = WhisperService(cfg=Settings(language="xx-YY"))
+
+    class _BrokenModel:
+        def transcribe(self, audio, **kwargs):
+            raise AssertionError("should be rejected before inference")
+
+    svc._model = _BrokenModel()
+    tone = (
+        np.sin(np.linspace(0, 1, 16000) * 2 * np.pi * 440) * 0.1
+    ).astype(np.float32)
+    job = Job(tone, None, None, False, None)
+    with pytest.raises(STTBadRequest, match="xx-YY"):
+        svc._infer(job)
+
+
 def test_concurrent_requests_serialized():
     import threading
 

@@ -15,6 +15,17 @@ from ..config import Settings, settings
 
 logger = logging.getLogger("stt.whisper")
 
+_VALID_LANGUAGE_CODES: frozenset[str] | None = None
+
+
+def _accepted_language_codes() -> frozenset[str]:
+    global _VALID_LANGUAGE_CODES
+    if _VALID_LANGUAGE_CODES is None:
+        from faster_whisper.tokenizer import _LANGUAGE_CODES
+
+        _VALID_LANGUAGE_CODES = frozenset(_LANGUAGE_CODES)
+    return _VALID_LANGUAGE_CODES
+
 # Apple Accelerate (numpy's default BLAS on macOS/arm64) sets bogus
 # floating-point exception flags in its sgemm kernel; numpy surfaces them as
 # RuntimeWarnings during faster-whisper's mel-spectrogram matmul even though
@@ -181,6 +192,18 @@ class WhisperService:
             raise
 
     # ------------------------------------------------------------ public ---
+    @staticmethod
+    def _validate_language(language: str | None) -> None:
+        if not language:
+            return
+        lang = language.strip()
+        accepted = _accepted_language_codes()
+        if lang not in accepted:
+            raise STTBadRequest(
+                f"Invalid language code: {lang!r}. Accepted codes: "
+                f"{', '.join(sorted(accepted))}"
+            )
+
     async def transcribe_pcm(
         self,
         pcm: bytes,
@@ -202,6 +225,7 @@ class WhisperService:
             raise STTBadRequest(
                 f"PCM too short: {duration_s:.3f}s < {self.cfg.min_utterance_ms}ms"
             )
+        self._validate_language(language)
 
         samples = np.frombuffer(pcm, dtype=np.int16)
         audio = samples.astype(np.float32) / 32768.0
@@ -226,6 +250,7 @@ class WhisperService:
         audio = await asyncio.to_thread(self._decode_file, content)
         if audio.size == 0:
             raise STTBadRequest("No decodable audio found in the uploaded file")
+        self._validate_language(language)
 
         future = asyncio.get_running_loop().create_future()
         return await self._enqueue(
@@ -242,6 +267,7 @@ class WhisperService:
         """Transcribe already-decoded 16kHz float32 audio; returns segments."""
         if audio.size == 0:
             raise STTBadRequest("No decodable audio found at the given URL")
+        self._validate_language(language)
 
         future = asyncio.get_running_loop().create_future()
         return await self._enqueue(
@@ -284,6 +310,10 @@ class WhisperService:
             wf.writeframes(samples.tobytes())
         logger.debug("Dumped %d samples @%dHz to %s", samples.size, sample_rate, path)
 
+    @staticmethod
+    def _is_silent(audio: np.ndarray, threshold: float) -> bool:
+        return audio.size == 0 or float(np.abs(audio).max()) < threshold
+
     def _infer(self, job: Job) -> dict[str, Any]:
         self.total_requests += 1
         model = self._model
@@ -293,6 +323,17 @@ class WhisperService:
         used_language = job.language or (
             self.cfg.language if job.use_config_default_language else None
         )
+        self._validate_language(used_language)
+        if self._is_silent(job.audio, self.cfg.silence_signal_level):
+            result: dict[str, Any] = {
+                "transcript": "",
+                "language": used_language or "",
+                "confidence": 0.0,
+            }
+            if job.include_segments:
+                result["durationMs"] = 0
+                result["segments"] = []
+            return result
         segments_iter, info = model.transcribe(
             job.audio,
             language=used_language,
@@ -303,9 +344,18 @@ class WhisperService:
             initial_prompt=job.initial_prompt,
             word_timestamps=job.word_timestamps,
         )
-        segments = list(segments_iter)
+        segments = [
+            seg
+            for seg in segments_iter
+            if (seg.text or "").strip()
+            and seg.compression_ratio <= self.cfg.compression_ratio_threshold
+            and not (
+                seg.no_speech_prob > self.cfg.no_speech_threshold
+                and seg.avg_logprob < self.cfg.logprob_threshold
+            )
+        ]
 
-        texts = [seg.text.strip() for seg in segments if seg.text and seg.text.strip()]
+        texts = [seg.text.strip() for seg in segments]
         transcript = " ".join(texts)
 
         # Confidence from avg log-prob as in the reference impl: exp(avg_lp).
