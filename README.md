@@ -143,7 +143,7 @@ at import time. Invalid integers/floats silently fall back to their default.
 | `WHISPER_LOGPROB_THRESHOLD` | `-1.0` | Low-confidence cutoff used together with `WHISPER_NO_SPEECH_THRESHOLD`. |
 | `WHISPER_COMPRESSION_RATIO_THRESHOLD` | `2.4` | Segments with a gzip compression ratio above this (repetitive loops) are dropped. |
 | `WHISPER_SILENCE_LEVEL` | `0.0001` | Peak signal amplitude in `[-1, 1]` below this → treated as digital silence, inference is skipped and an empty transcript is returned. Catches clips Whisper would otherwise hallucinate on (e.g. `no_speech_prob ≈ 0` for full digital silence). |
-| `WHISPER_INITIAL_PROMPT` | *(built-in Hindi agriculture vocabulary)* | Read directly in `whisper_service.py` (not via `Settings`). **Currently not applied** — see [Design notes](#domain-initial-prompt). |
+| `WHISPER_INITIAL_PROMPT` | *(built-in Hindi agriculture vocabulary)* | Read directly in `whisper_service.py` (not via `Settings`). Not applied by default — callers can pass `initial_prompt` per request to use domain vocabulary. See [Design notes](#domain-initial-prompt). |
 
 ### Audio
 
@@ -267,6 +267,7 @@ Transcribes a **raw mono `s16le` PCM** body (no WAV header).
 | `language` | string | configured `WHISPER_LANGUAGE` (`hi`) | Language hint, e.g. `hi`, `en`. |
 | `request_id` | string | *(none)* | Correlation ID echoed in logs. |
 | `word_timestamps` | bool | `false` | Include per-word timestamps in `data.words`. |
+| `initial_prompt` | string | *(none)* | Domain-specific vocabulary hint for Whisper. Each app can pass its own prompt per request. |
 
 **Validation** (all → `400`)
 
@@ -286,6 +287,15 @@ Transcribes a **raw mono `s16le` PCM** body (no WAV header).
 
 ```bash
 curl -X POST http://localhost:8000/transcribe-pcm \
+  -H "X-Sample-Rate: 48000" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @utterance.pcm
+```
+
+With domain vocabulary:
+
+```bash
+curl -X POST "http://localhost:8000/transcribe-pcm?initial_prompt=gehu%20mein%20pila%20rog" \
   -H "X-Sample-Rate: 48000" \
   -H "Content-Type: application/octet-stream" \
   --data-binary @utterance.pcm
@@ -320,7 +330,7 @@ WAV/MP3/FLAC/OGG/M4A (anything `faster_whisper.audio.decode_audio` can decode).
 |---|---|---|
 | `file` | yes | Audio file. |
 
-**Query parameters** — same as `/transcribe-pcm`: `language`, `request_id`,
+**Query parameters** — `language`, `request_id`,
 `word_timestamps` (default `false`).
 
 **Example**
@@ -549,10 +559,9 @@ cancelled and the worker skips it.
   WAV. Each request logs `request_id`, sample rate, duration and transcript.
 - <a id="domain-initial-prompt"></a>**Domain initial prompt**: a Hindi
   agriculture vocabulary string is defined as `DEFAULT_INITIAL_PROMPT`
-  (overridable via `WHISPER_INITIAL_PROMPT`), but the `Job.initial_prompt`
-  field currently defaults to `None` and no caller sets it — so the prompt is
-  **disabled** and not passed to `model.transcribe`. Re-wiring it is a
-  one-line change if the vocabulary bias is wanted back.
+  (overridable via `WHISPER_INITIAL_PROMPT`). The `/transcribe-pcm` endpoint
+  accepts an optional `initial_prompt` query parameter so each app can pass its
+  own vocabulary hint per request. If omitted, no domain prompt is applied.
 - **macOS warning filter**: numpy's Accelerate BLAS emits spurious
   `RuntimeWarning: ... encountered in matmul` messages during the mel-spectrogram
   matmul; `whisper_service.py` filters exactly that message so real warnings

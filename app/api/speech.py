@@ -25,6 +25,7 @@ async def transcribe_pcm(
     language: Annotated[str | None, Query(description="Language hint, e.g. 'hi'")] = None,
     request_id: Annotated[str | None, Query(description="Correlation ID echoed for logs/tracing")] = None,
     word_timestamps: Annotated[bool, Query(description="Include per-word timestamps")] = False,
+    initial_prompt: Annotated[str | None, Query(description="Domain-specific vocabulary hint for Whisper")] = None,
 ) -> ApiResponse:
     """Transcribe a raw mono s16le PCM utterance (no WAV header)."""
     body = await request.body()
@@ -39,6 +40,7 @@ async def transcribe_pcm(
             language=language,
             request_id=request_id,
             word_timestamps=word_timestamps,
+            initial_prompt=initial_prompt,
         )
     except STTBadRequest as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

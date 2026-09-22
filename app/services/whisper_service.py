@@ -211,6 +211,7 @@ class WhisperService:
         language: str | None = None,
         request_id: str | None = None,
         word_timestamps: bool = False,
+        initial_prompt: str | None = None,
     ) -> dict[str, Any]:
         if not pcm:
             raise STTBadRequest("Empty PCM body")
@@ -237,7 +238,14 @@ class WhisperService:
 
         future = asyncio.get_running_loop().create_future()
         return await self._enqueue(
-            Job(audio, language, request_id, word_timestamps, future)
+            Job(
+                audio,
+                language,
+                request_id,
+                word_timestamps,
+                future,
+                initial_prompt=initial_prompt,
+            )
         )
 
     async def transcribe_file(
