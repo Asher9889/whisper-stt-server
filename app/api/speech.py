@@ -15,7 +15,7 @@ from ..services.whisper_service import (
 logger = logging.getLogger("stt.api")
 router = APIRouter(tags=["stt"])
 
-DEFAULT_SAMPLE_RATE = 48000  # LiveKit room rate; used when header is absent.
+DEFAULT_SAMPLE_RATE = 24000  # LiveKit room capture rate; used when header is absent.
 
 
 @router.post("/transcribe-pcm", response_model=ApiResponse)

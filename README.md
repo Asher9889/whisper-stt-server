@@ -151,7 +151,7 @@ at import time. Invalid integers/floats silently fall back to their default.
 |---|---|---|
 | `WHISPER_TARGET_SAMPLE_RATE` | `16000` | Rate the model expects; incoming PCM is resampled to this. |
 | `WHISPER_MIN_UTTERANCE_MS` | `40` | PCM shorter than this is rejected as `400` (avoid feeding noise/zero-length clips to the model). |
-| `WHISPER_AUDIO_DUMP_DIR` | *(none)* | If set, every `/transcribe-pcm` body is written as a mono WAV for debugging. |
+| `WHISPER_AUDIO_DUMP_DIR` | *(none)* | If set, every `/transcribe-pcm` body is resampled to `WHISPER_TARGET_SAMPLE_RATE` (16 kHz), then written as a mono WAV for debugging. |
 
 ### Concurrency
 
@@ -257,7 +257,7 @@ Transcribes a **raw mono `s16le` PCM** body (no WAV header).
 
 | Header | Default | Description |
 |---|---|---|
-| `X-Sample-Rate` | `48000` | Sample rate of the PCM body. Must be in `[8000, 96000]`. |
+| `X-Sample-Rate` | `24000` | Sample rate of the PCM body. Must be in `[8000, 96000]`. |
 | `Content-Type` | — | Use `application/octet-stream`. |
 
 **Query parameters** (all optional)
@@ -281,7 +281,9 @@ Transcribes a **raw mono `s16le` PCM** body (no WAV header).
 - Bytes → `int16` → `float32 / 32768.0`.
 - Resampled to `WHISPER_TARGET_SAMPLE_RATE` (16 kHz) with
   `scipy.signal.resample_poly` only when the input rate differs.
-- Optionally dumped to a WAV when `WHISPER_AUDIO_DUMP_DIR` is set.
+- Optionally dumped to a WAV when `WHISPER_AUDIO_DUMP_DIR` is set. The dump is
+  written at `WHISPER_TARGET_SAMPLE_RATE` (16 kHz), i.e. the resampled audio
+  the model actually sees, so the conversion is directly verifiable.
 
 **Example**
 

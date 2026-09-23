@@ -234,7 +234,11 @@ class WhisperService:
             audio = resample_poly(
                 audio, up=self.cfg.target_sample_rate, down=sample_rate
             )
-        self._dump_audio(samples, sample_rate, request_id)
+        self._dump_audio(
+            (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16),
+            self.cfg.target_sample_rate,
+            request_id,
+        )
 
         future = asyncio.get_running_loop().create_future()
         return await self._enqueue(
@@ -351,6 +355,7 @@ class WhisperService:
             condition_on_previous_text=self.cfg.condition_on_previous_text,
             initial_prompt=job.initial_prompt,
             word_timestamps=job.word_timestamps,
+            hotwords=("नारियल, आम, गेहूं, धान, मक्का, कीड़ा, कीट, उर्वरक, खाद, कीटनाशक, सिंचाई")
         )
         segments = [
             seg
